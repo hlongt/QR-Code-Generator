@@ -1,0 +1,1219 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#f5f2ea">
+<meta name="description" content="二维码生成器 · 在浏览器里生成、调色、导出 PNG / SVG。">
+<title>二维码生成器 · QR Code Generator</title>
+
+<script src="https://cdn.jsdelivr.net/npm/qr-code-styling@1.5.0/lib/qr-code-styling.js"></script>
+
+<style>
+  :root{
+    --bg:#f5f2ea;
+    --surface:#faf7f0;
+    --field:#fffdf8;
+    --ink:#1d1a15;
+    --ink-soft:#4a443c;
+    --muted:#8b8375;
+    --line:#ded7c7;
+    --line-strong:#c8bfab;
+    --hover:rgba(29,26,21,.045);
+    --accent:#b3502c;
+    --on-ink:#faf7f0;
+    --shadow:rgba(29,26,21,.16);
+    --grain:.34;
+    --max:1160px;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+    --ease:cubic-bezier(.22,1,.36,1);
+  }
+
+  *,*::before,*::after{box-sizing:border-box}
+  html{color-scheme:light;scroll-behavior:smooth}
+  body{
+    margin:0;min-height:100vh;
+    color:var(--ink);background:var(--bg);
+    font-family:var(--sans);font-size:14px;line-height:1.6;
+    -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+    transition:background-color .3s var(--ease),color .3s var(--ease);
+  }
+  /* 纸面的天光：顶部略亮，往下沉一点，别做成渐变海报 */
+  body::before{
+    content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+    background:radial-gradient(120% 72% at 50% -8%,#fdfbf5 0%,var(--bg) 52%,#efeade 100%);
+  }
+  /* 一层几乎看不见的纸纹 */
+  body::after{
+    content:"";position:fixed;inset:0;z-index:60;pointer-events:none;
+    opacity:calc(var(--grain) * .09);mix-blend-mode:multiply;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  ::selection{background:rgba(179,80,44,.18)}
+  [hidden]{display:none!important}
+  a{color:inherit;text-decoration:none}
+  button{font:inherit;color:inherit}
+  h1,h2,h3,p{margin:0}
+
+  .container{width:min(var(--max),calc(100% - 88px));margin:0 auto}
+
+  /* ---------- 题头 ---------- */
+  .intro{
+    display:grid;grid-template-columns:minmax(0,1fr) auto;
+    gap:32px;align-items:start;
+    padding:52px 0 40px;
+  }
+  .intro h1{
+    font-size:clamp(32px,4.6vw,44px);
+    font-weight:600;line-height:1.05;letter-spacing:-.045em;
+  }
+  .intro-lead{
+    max-width:620px;margin-top:12px;
+    color:var(--ink-soft);font-size:13.5px;line-height:1.8;
+  }
+  .intro-actions{display:flex;align-items:center;gap:8px;justify-self:end}
+
+  .ghost-btn{
+    display:inline-flex;align-items:center;gap:7px;
+    height:30px;padding:0 13px;
+    border:1px solid var(--line-strong);border-radius:999px;
+    background:transparent;color:var(--ink-soft);
+    font-size:11.5px;letter-spacing:.02em;cursor:pointer;
+    transition:background .18s var(--ease),border-color .18s var(--ease),color .18s var(--ease);
+  }
+  .ghost-btn svg{width:12px;height:12px;display:block;opacity:.8}
+  .ghost-btn:hover{background:var(--hover);border-color:var(--ink-soft);color:var(--ink)}
+
+  /* ---------- 工作台 ---------- */
+  .workbench{
+    display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);
+    gap:56px;align-items:start;
+    padding-bottom:56px;
+  }
+
+  /* 清单式表单：标签在左，控件在右 */
+  .sheet{border-top:1px solid var(--line-strong)}
+  #form-container{display:contents}
+  .form-group{display:contents}
+
+  .row{
+    display:grid;grid-template-columns:98px minmax(0,1fr);
+    gap:0 26px;align-items:start;
+    padding:14px 0;
+    border-bottom:1px solid var(--line);
+  }
+  .row-label{
+    padding-top:8px;
+    font-size:11.5px;letter-spacing:.02em;color:var(--muted);
+    transition:color .18s var(--ease);
+  }
+  label.row-label{cursor:pointer}
+  .row:focus-within > .row-label{color:var(--ink)}
+  .row-body{min-width:0}
+
+  /* 组与组之间：一道更重的细线 + 呼吸空隙 */
+  .row-start{
+    margin-top:26px;padding-top:26px;
+    border-top:1px solid var(--line-strong);
+  }
+
+  /* ---------- 输入 ---------- */
+  .row-body input[type="text"],
+  .row-body input[type="url"],
+  .row-body input[type="email"],
+  .row-body input[type="tel"],
+  .row-body input[type="password"],
+  .row-body textarea,
+  .row-body select{
+    width:100%;min-height:34px;padding:5px 0;
+    border:0;border-radius:0;background:transparent;
+    color:var(--ink);
+    font-family:var(--sans);font-size:14px;line-height:1.6;
+    outline:none;appearance:none;-webkit-appearance:none;
+    box-shadow:inset 0 -1px 0 transparent;
+    transition:box-shadow .22s var(--ease);
+  }
+  /* 三种类型的内容输入框保持同一尺寸 */
+  .row-body textarea{resize:none;height:34px;min-height:34px;overflow-y:auto;display:block}
+  .row-body input::placeholder,.row-body textarea::placeholder{color:var(--muted);opacity:.65}
+  .row-body input:focus,.row-body textarea:focus,.row-body select:focus{box-shadow:inset 0 -1px 0 var(--ink)}
+  .select-wrap{position:relative}
+  .select-wrap::after{
+    content:"";position:absolute;right:2px;top:50%;width:5px;height:5px;
+    border-right:1px solid var(--muted);border-bottom:1px solid var(--muted);
+    transform:translateY(-72%) rotate(45deg);pointer-events:none;
+  }
+  .select-wrap select{padding-right:22px;cursor:pointer}
+
+  /* ---------- 颜色 ---------- */
+  .color-line{display:flex;align-items:center;gap:12px;min-height:34px}
+  input[type="color"]{
+    -webkit-appearance:none;appearance:none;
+    width:30px;height:30px;flex:0 0 auto;padding:0;
+    border:1px solid var(--line-strong);border-radius:2px;
+    background:transparent;cursor:pointer;
+    transition:opacity .2s var(--ease);
+  }
+  input[type="color"]::-webkit-color-swatch-wrapper{padding:3px}
+  input[type="color"]::-webkit-color-swatch{border:0;border-radius:1px}
+  input[type="color"]::-moz-color-swatch{border:0;border-radius:1px}
+  input[type="color"]:disabled{opacity:.32;cursor:not-allowed}
+
+  .row-body .color-line .hex{
+    width:82px;flex:0 0 auto;padding:4px 0;
+    border:0;border-bottom:1px solid transparent;border-radius:0;
+    background:transparent;color:var(--ink-soft);
+    font-family:var(--mono);font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;
+    outline:none;
+    box-shadow:none;
+    transition:border-color .2s var(--ease),color .2s var(--ease);
+  }
+  .row-body .color-line .hex:focus{border-bottom-color:var(--ink);color:var(--ink);box-shadow:none}
+  .row-body .color-line .hex:disabled{opacity:.4}
+
+  /* ---------- 勾选 ---------- */
+  .check{display:inline-flex;align-items:center;gap:8px;cursor:pointer;user-select:none;
+    font-size:11.5px;color:var(--ink-soft);white-space:nowrap}
+  .check input{position:absolute;opacity:0;width:0;height:0;pointer-events:none}
+  .check .box{
+    position:relative;width:13px;height:13px;flex:0 0 auto;
+    border:1px solid var(--line-strong);border-radius:2px;
+    transition:background .16s var(--ease),border-color .16s var(--ease);
+  }
+  .check .box::after{
+    content:"";position:absolute;left:4px;top:1px;width:3.5px;height:7px;
+    border-right:1.5px solid var(--on-ink);border-bottom:1.5px solid var(--on-ink);
+    transform:rotate(40deg) scale(0);transform-origin:50% 50%;
+    transition:transform .16s var(--ease);
+  }
+  .check input:checked + .box{background:var(--ink);border-color:var(--ink)}
+  .check input:checked + .box::after{transform:rotate(40deg) scale(1)}
+  .check input:focus-visible + .box{outline:2px solid var(--accent);outline-offset:2px}
+
+  /* ---------- 分段控件 ---------- */
+  .seg{
+    display:grid;grid-template-columns:repeat(var(--cols,3),minmax(0,1fr));
+    border:1px solid var(--line-strong);border-radius:2px;
+    overflow:hidden;background:transparent;
+  }
+  .seg button{
+    -webkit-appearance:none;appearance:none;
+    margin:-1px 0 0 -1px;padding:8px 4px;
+    border:0;border-left:1px solid var(--line);border-top:1px solid var(--line);
+    background:transparent;color:var(--ink-soft);
+    font-size:12px;line-height:1.4;letter-spacing:.01em;cursor:pointer;
+    transition:background .16s var(--ease),color .16s var(--ease),border-color .16s var(--ease);
+  }
+  .seg button:hover{background:var(--hover);color:var(--ink)}
+  .seg button.is-active{background:var(--ink);border-color:var(--ink);color:var(--on-ink)}
+  .seg button:focus-visible{outline:2px solid var(--accent);outline-offset:-3px}
+
+  /* ---------- 滑杆 ---------- */
+  .range-line{display:flex;align-items:center;gap:14px;min-height:34px}
+  input[type="range"]{
+    -webkit-appearance:none;appearance:none;flex:1 1 auto;min-width:60px;
+    height:1px;margin:0;background:var(--line-strong);outline:none;cursor:pointer;
+  }
+  input[type="range"]::-webkit-slider-thumb{
+    -webkit-appearance:none;width:11px;height:11px;border-radius:50%;
+    background:var(--ink);border:0;cursor:pointer;transition:transform .16s var(--ease);
+  }
+  input[type="range"]:hover::-webkit-slider-thumb{transform:scale(1.22)}
+  input[type="range"]::-moz-range-thumb{width:11px;height:11px;border:0;border-radius:50%;background:var(--ink);cursor:pointer}
+  input[type="range"]:disabled{cursor:default}
+  input[type="range"]:disabled:hover::-webkit-slider-thumb{transform:none}
+
+  /* 未上传 Logo 时，相关参数整行淡出 */
+  .row.logo-dep{transition:opacity .22s var(--ease)}
+  .row.logo-dep.is-off{opacity:.38;pointer-events:none}
+  .range-val{
+    flex:0 0 auto;width:44px;text-align:right;
+    font-family:var(--mono);font-size:11px;color:var(--muted);
+  }
+
+  /* ---------- 文件 ---------- */
+  .file-line{display:flex;align-items:center;gap:10px}
+  .file-row{
+    flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:9px;
+    padding:7px 0;cursor:pointer;
+  }
+  .file-plus{
+    width:22px;height:22px;flex:0 0 auto;display:grid;place-items:center;
+    border:1px solid var(--line-strong);border-radius:50%;
+    font-family:var(--mono);font-size:12px;line-height:1;color:var(--ink-soft);
+    transition:border-color .18s var(--ease),color .18s var(--ease);
+  }
+  .file-row:hover .file-plus{border-color:var(--ink);color:var(--ink)}
+  .file-label{font-size:13px;color:var(--ink-soft)}
+  .file-name{
+    margin-left:auto;min-width:0;
+    font-family:var(--mono);font-size:10.5px;color:var(--muted);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  }
+  .link-btn{
+    flex:0 0 auto;padding:4px 0;border:0;background:transparent;
+    color:var(--muted);font-size:11.5px;cursor:pointer;
+    border-bottom:1px solid transparent;
+    transition:color .18s var(--ease),border-color .18s var(--ease);
+  }
+  .link-btn:hover{color:var(--accent);border-bottom-color:var(--accent)}
+
+  .note{margin-top:7px;font-size:10.5px;color:var(--muted);letter-spacing:.01em}
+
+  /* ---------- 预览 ---------- */
+  .col-preview{position:sticky;top:24px}
+  .preview-card{
+    border:1px solid var(--line-strong);border-radius:3px;
+    background:var(--surface);
+    box-shadow:0 1px 1px rgba(29,26,21,.03),0 26px 44px -38px var(--shadow);
+  }
+  .preview-head{
+    display:flex;align-items:center;justify-content:space-between;gap:14px;
+    padding:12px 16px;border-bottom:1px solid var(--line);
+  }
+  .live{display:inline-flex;align-items:center;gap:7px;font-size:11px;color:var(--ink-soft)}
+  .live i{width:5px;height:5px;border-radius:50%;background:var(--accent);animation:breathe 3.2s ease-in-out infinite}
+  @keyframes breathe{0%,100%{opacity:1}50%{opacity:.28}}
+  .meta{
+    display:flex;align-items:center;gap:7px;
+    font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;color:var(--muted);
+  }
+  .meta .sep{opacity:.55}
+
+  .qr-stage{
+    margin:16px;padding:20px;
+    border:1px solid var(--line);border-radius:2px;
+    display:grid;place-items:center;min-height:330px;
+  }
+  .checkerboard-bg{
+    background-color:var(--field);
+    background-image:
+      linear-gradient(45deg,rgba(29,26,21,.035) 25%,transparent 25%,transparent 75%,rgba(29,26,21,.035) 75%),
+      linear-gradient(45deg,rgba(29,26,21,.035) 25%,transparent 25%,transparent 75%,rgba(29,26,21,.035) 75%);
+    background-size:16px 16px;background-position:0 0,8px 8px;
+  }
+  #qr-canvas-wrapper{width:100%;max-width:330px;display:grid;place-items:center}
+  #qr-canvas-wrapper svg,#qr-canvas-wrapper canvas{display:block;width:100%;height:auto;max-width:100%}
+  .qr-empty{
+    width:100%;min-height:288px;
+    display:grid;place-items:center;text-align:center;
+    border:1px dashed var(--line-strong);border-radius:2px;
+    font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;
+    color:var(--muted);
+  }
+
+  .preview-foot{
+    display:flex;align-items:baseline;justify-content:space-between;gap:12px;
+    padding:0 16px 14px;
+    font-family:var(--mono);font-size:9.5px;letter-spacing:.05em;color:var(--muted);
+  }
+  .preview-foot .data{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .preview-foot .chars{flex:0 0 auto}
+
+  .actions{
+    margin-top:2px;padding:14px 16px 16px;
+    border-top:1px solid var(--line);
+    display:flex;flex-direction:column;gap:8px;
+  }
+  .btn{
+    display:flex;align-items:center;justify-content:center;gap:9px;
+    width:100%;min-height:42px;padding:0 14px;
+    border:1px solid transparent;border-radius:2px;
+    font-family:var(--sans);font-size:12.5px;letter-spacing:.02em;cursor:pointer;
+    transition:background .18s var(--ease),color .18s var(--ease),border-color .18s var(--ease),transform .18s var(--ease);
+  }
+  .btn:active{transform:translateY(1px)}
+  .btn-primary{background:var(--ink);border-color:var(--ink);color:var(--on-ink);font-weight:500}
+  .btn-primary:hover{background:var(--ink-soft);border-color:var(--ink-soft)}
+  .btn-note{font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;opacity:.6}
+  .btn-ghost{background:transparent;border-color:var(--line-strong);color:var(--ink-soft);font-size:12px}
+  .btn-ghost:hover{background:var(--hover);color:var(--ink);border-color:var(--ink-soft)}
+  .action-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+
+  /* ---------- 历史抽屉 ---------- */
+  .drawer-root{position:fixed;inset:0;z-index:80;visibility:hidden;pointer-events:none}
+  .drawer-root.is-open{visibility:visible;pointer-events:auto}
+  .drawer-scrim{
+    position:absolute;inset:0;background:rgba(24,21,17,.34);
+    opacity:0;transition:opacity .3s var(--ease);
+    backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);
+  }
+  .drawer-root.is-open .drawer-scrim{opacity:1}
+  .drawer{
+    position:absolute;top:0;right:0;bottom:0;width:min(396px,100%);
+    display:flex;flex-direction:column;
+    background:var(--surface);border-left:1px solid var(--line-strong);
+    box-shadow:-30px 0 60px -50px var(--shadow);
+    transform:translateX(100%);
+    transition:transform .36s var(--ease);
+  }
+  .drawer-root.is-open .drawer{transform:none}
+  .drawer-head{
+    display:flex;align-items:center;justify-content:space-between;gap:16px;
+    padding:22px 22px 16px;border-bottom:1px solid var(--line);
+  }
+  .drawer-head h2{font-size:16px;font-weight:600;letter-spacing:-.01em}
+  .close-btn{
+    width:26px;height:26px;margin-right:-4px;
+    display:grid;place-items:center;border:0;border-radius:50%;background:transparent;
+    color:var(--muted);cursor:pointer;
+    transition:background .18s var(--ease),color .18s var(--ease);
+  }
+  .close-btn:hover{background:var(--hover);color:var(--ink)}
+  .close-btn svg{width:11px;height:11px;display:block}
+  .history-list{flex:1 1 auto;overflow-y:auto;padding:4px 22px 16px}
+  .history-empty{padding:34px 0;text-align:center;font-size:11.5px;line-height:1.8;color:var(--muted)}
+  .history-item{
+    display:grid;grid-template-columns:1fr auto;gap:3px 12px;
+    width:100%;padding:13px 0;border:0;border-bottom:1px solid var(--line);
+    background:transparent;text-align:left;cursor:pointer;
+  }
+  .hi-type{font-size:10px;color:var(--muted);letter-spacing:.06em}
+  .hi-time{font-family:var(--mono);font-size:9.5px;color:var(--muted);text-align:right}
+  .hi-data{
+    grid-column:1 / -1;font-size:12px;color:var(--ink-soft);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    transition:color .18s var(--ease);
+  }
+  .history-item:hover .hi-data{color:var(--ink)}
+  .history-item:hover .hi-type{color:var(--accent)}
+  .drawer-foot{
+    display:flex;align-items:center;justify-content:space-between;gap:16px;
+    padding:14px 22px 18px;border-top:1px solid var(--line);
+    font-size:10.5px;color:var(--muted);
+  }
+  .drawer-foot button{
+    padding:0;border:0;background:transparent;color:var(--muted);cursor:pointer;
+    font-family:inherit;font-size:inherit;border-bottom:1px solid transparent;
+    transition:color .18s var(--ease),border-color .18s var(--ease);
+  }
+  .drawer-foot button:hover{color:var(--accent);border-bottom-color:var(--accent)}
+
+  /* ---------- 提示 ---------- */
+  #toast-container{
+    position:fixed;right:24px;bottom:24px;z-index:90;
+    display:flex;flex-direction:column;gap:8px;align-items:flex-end;
+    pointer-events:none;
+  }
+  .toast{
+    display:flex;align-items:center;gap:10px;
+    padding:10px 14px;border-radius:2px;
+    background:var(--ink);color:var(--on-ink);
+    font-size:11.5px;letter-spacing:.02em;line-height:1.4;
+    box-shadow:0 18px 34px -26px var(--shadow);
+    opacity:0;transform:translateY(8px);
+    transition:opacity .26s var(--ease),transform .26s var(--ease);
+  }
+  .toast.in{opacity:1;transform:none}
+  .toast::before{content:"";width:2px;height:13px;flex:0 0 auto;background:var(--accent)}
+  .toast.is-error::before{background:#f2a08b}
+
+  /* ---------- 页脚 ---------- */
+  .site-footer{border-top:1px solid var(--line)}
+  .footer-inner{
+    padding:22px 0 28px;
+    font-family:var(--mono);font-size:10px;letter-spacing:.08em;
+    color:var(--muted);text-align:center;
+  }
+
+  /* ---------- 响应式 ---------- */
+  @media (max-width:1000px){
+    .container{width:min(var(--max),calc(100% - 56px))}
+    .workbench{grid-template-columns:minmax(0,1fr);gap:8px}
+    .col-preview{position:static;order:-1;margin-bottom:36px}
+    .intro{padding:40px 0 30px}
+  }
+  @media (max-width:620px){
+    .container{width:calc(100% - 36px)}
+    .intro{grid-template-columns:minmax(0,1fr) auto;gap:16px;padding:30px 0 26px}
+    .intro h1{font-size:clamp(29px,9vw,34px)}
+    .intro-lead{font-size:12.5px;margin-top:10px}
+    .row{grid-template-columns:1fr;gap:3px 0;padding:13px 0}
+    .row-label{padding-top:0}
+    .row-start{margin-top:20px;padding-top:20px}
+    .qr-stage{margin:12px;padding:14px;min-height:260px}
+    #qr-canvas-wrapper{max-width:270px}
+    .preview-head{padding:11px 13px}
+    .meta{font-size:9px}
+    .actions{padding:12px 12px 12px}
+    .preview-foot{padding:0 13px 12px}
+    #toast-container{right:14px;left:14px;bottom:16px;align-items:stretch}
+    .drawer{width:100%}
+    .seg button{font-size:11.5px;padding:8px 2px}
+  }
+  @media (max-width:400px){
+    .ghost-btn span{display:none}
+    .ghost-btn{padding:0 10px}
+  }
+  @media (prefers-reduced-motion:reduce){
+    *{animation-duration:.01ms!important;transition-duration:.01ms!important}
+    html{scroll-behavior:auto}
+  }
+</style>
+</head>
+
+<body>
+
+<main class="container">
+
+  <section class="intro">
+    <div>
+      <h1>二维码生成器</h1>
+      <p class="intro-lead">输入内容即可实时生成，由本地浏览器渲染生成，不经过任何服务器</p>
+    </div>
+
+    <div class="intro-actions">
+      <button id="btn-history" class="ghost-btn" type="button" title="历史记录">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M2.6 8a5.4 5.4 0 1 0 1.6-3.8"/>
+          <path d="M2.4 2.6v2.4h2.4M8 5.2V8l2 1.3"/>
+        </svg>
+        <span>历史记录</span>
+      </button>
+    </div>
+  </section>
+
+  <div class="workbench">
+
+    <!-- 左：参数 -->
+    <section class="col-form">
+      <div class="sheet">
+
+        <div class="row">
+          <span class="row-label">类型</span>
+          <div class="row-body">
+            <div class="seg" style="--cols:3" id="type-tabs" role="tablist" aria-label="二维码类型">
+              <button class="type-tab is-active" data-type="text" type="button" role="tab" aria-selected="true">文本</button>
+              <button class="type-tab" data-type="url" type="button" role="tab" aria-selected="false">网址</button>
+              <button class="type-tab" data-type="wifi" type="button" role="tab" aria-selected="false">Wi-Fi</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="form-container">
+
+          <div id="form-text" class="form-group">
+            <div class="row">
+              <label class="row-label" for="input-text">文本</label>
+              <div class="row-body">
+                <textarea id="input-text" rows="1" placeholder="例如 你好 Hello!"></textarea>
+              </div>
+            </div>
+          </div>
+
+          <div id="form-url" class="form-group" hidden>
+            <div class="row">
+              <label class="row-label" for="input-url">链接</label>
+              <div class="row-body">
+                <input type="url" id="input-url" placeholder="例如 https://hlongt.github.io" spellcheck="false">
+              </div>
+            </div>
+          </div>
+
+          <div id="form-wifi" class="form-group" hidden>
+            <div class="row">
+              <label class="row-label" for="wifi-ssid">网络名称</label>
+              <div class="row-body">
+                <input type="text" id="wifi-ssid" placeholder="例如 MyHomeWiFi" spellcheck="false">
+              </div>
+            </div>
+            <div class="row">
+              <label class="row-label" for="wifi-password">密码</label>
+              <div class="row-body">
+                <input type="password" id="wifi-password" placeholder="Wi-Fi 密码">
+              </div>
+            </div>
+            <div class="row">
+              <label class="row-label" for="wifi-encryption">加密方式</label>
+              <div class="row-body">
+                <div class="select-wrap">
+                  <select id="wifi-encryption">
+                    <option value="WPA">WPA / WPA2 / WPA3</option>
+                    <option value="WEP">WEP</option>
+                    <option value="nopass">无密码 (Open)</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- 外观 -->
+        <div class="row row-start">
+          <span class="row-label">码点颜色</span>
+          <div class="row-body">
+            <div class="color-line">
+              <input type="color" id="color-dots" value="#1e1b4b" aria-label="码点颜色">
+              <input type="text" id="color-dots-text" class="hex" value="#1E1B4B" spellcheck="false" aria-label="码点颜色十六进制值">
+            </div>
+          </div>
+        </div>
+
+        <div class="row">
+          <span class="row-label">背景色</span>
+          <div class="row-body">
+            <div class="color-line">
+              <input type="color" id="color-bg" value="#ffffff" aria-label="背景颜色">
+              <input type="text" id="color-bg-text" class="hex" value="#FFFFFF" spellcheck="false" aria-label="背景颜色十六进制值">
+              <label class="check" style="margin-left:auto">
+                <input type="checkbox" id="bg-transparent">
+                <span class="box"></span>
+                <span>透明</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="row">
+          <span class="row-label">码点形状</span>
+          <div class="row-body">
+            <div class="seg" style="--cols:5" data-for="dots-style">
+              <button type="button" data-val="square">方块</button>
+              <button type="button" data-val="dots">圆点</button>
+              <button type="button" data-val="rounded">圆角</button>
+              <button type="button" data-val="extra-rounded">平滑</button>
+              <button type="button" data-val="classy">典雅</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="row">
+          <span class="row-label">定位角外框</span>
+          <div class="row-body">
+            <div class="seg" style="--cols:3" data-for="corners-square-style">
+              <button type="button" data-val="square">直角</button>
+              <button type="button" data-val="extra-rounded">圆角</button>
+              <button type="button" data-val="dot">圆形</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="row">
+          <span class="row-label">定位角内点</span>
+          <div class="row-body">
+            <div class="seg" style="--cols:2" data-for="corners-dot-style">
+              <button type="button" data-val="dot">圆点</button>
+              <button type="button" data-val="square">方块</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 中心图标 -->
+        <div class="row row-start">
+          <span class="row-label">中心图标</span>
+          <div class="row-body">
+            <div class="file-line">
+              <label class="file-row">
+                <span class="file-plus" aria-hidden="true">+</span>
+                <span class="file-label">上传图片</span>
+                <span class="file-name" id="logo-name">未选择</span>
+                <input type="file" id="logo-file" accept="image/*" hidden>
+              </label>
+              <button id="btn-remove-logo" class="link-btn" type="button" hidden>移除</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="row logo-dep">
+          <label class="row-label" for="logo-size">图标大小</label>
+          <div class="row-body">
+            <div class="range-line">
+              <input type="range" id="logo-size" min="0.1" max="0.5" step="0.05" value="0.4" aria-label="Logo 占比大小">
+              <span class="range-val" id="val-logo-size">0.4</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="row logo-dep">
+          <label class="row-label" for="logo-margin">图标边距</label>
+          <div class="row-body">
+            <div class="range-line">
+              <input type="range" id="logo-margin" min="0" max="20" step="1" value="5" aria-label="Logo 边距">
+              <span class="range-val" id="val-logo-margin">5px</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 输出 -->
+        <div class="row row-start">
+          <span class="row-label">像素尺寸</span>
+          <div class="row-body">
+            <div class="seg" style="--cols:4" data-for="qr-size">
+              <button type="button" data-val="300">300</button>
+              <button type="button" data-val="500">500</button>
+              <button type="button" data-val="1000">1000</button>
+              <button type="button" data-val="2000">2000</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="row">
+          <span class="row-label">纠错等级</span>
+          <div class="row-body">
+            <div class="seg" style="--cols:4" data-for="ecc-level">
+              <button type="button" data-val="L">L</button>
+              <button type="button" data-val="M">M</button>
+              <button type="button" data-val="Q">Q</button>
+              <button type="button" data-val="H">H</button>
+            </div>
+            <p class="note">L 7% · M 15% · Q 25% · H 30% 冗余，等级越高越容易扫出，嵌入图标时用 H。</p>
+          </div>
+        </div>
+
+        <select id="dots-style" hidden>
+          <option value="square">经典方块 (Square)</option>
+          <option value="dots">圆点 (Dots)</option>
+          <option value="rounded" selected>圆角方块 (Rounded)</option>
+          <option value="extra-rounded">平滑大圆角</option>
+          <option value="classy">典雅风格 (Classy)</option>
+        </select>
+        <select id="corners-square-style" hidden>
+          <option value="square">直角 (Square)</option>
+          <option value="extra-rounded" selected>圆角 (Extra Rounded)</option>
+          <option value="dot">圆形 (Dot)</option>
+        </select>
+        <select id="corners-dot-style" hidden>
+          <option value="dot" selected>圆点 (Dot)</option>
+          <option value="square">方块 (Square)</option>
+        </select>
+        <select id="qr-size" hidden>
+          <option value="300">300 x 300 px (标准)</option>
+          <option value="500" selected>500 x 500 px (高清)</option>
+          <option value="1000">1000 x 1000 px (超清)</option>
+          <option value="2000">2000 x 2000 px (印刷级)</option>
+        </select>
+        <select id="ecc-level" hidden>
+          <option value="L">L - 7% 容错 (简单数据)</option>
+          <option value="M">M - 15% 容错 (推荐)</option>
+          <option value="Q">Q - 25% 容错</option>
+          <option value="H" selected>H - 30% 容错 (嵌入 Logo 时推荐)</option>
+        </select>
+
+      </div>
+    </section>
+
+    <!-- 右：预览 -->
+    <aside class="col-preview">
+      <div class="preview-card">
+        <div class="preview-head">
+          <span class="live"><i aria-hidden="true"></i>实时预览</span>
+          <div class="meta">
+            <span id="meta-size">500 × 500</span>
+            <span class="sep">/</span>
+            <span id="meta-ecc">ECC H · 30%</span>
+          </div>
+        </div>
+
+        <div class="qr-stage checkerboard-bg">
+          <div id="qr-canvas-wrapper"></div>
+        </div>
+
+        <div class="preview-foot">
+          <span class="data" id="qr-data">文本</span>
+          <span class="chars" id="qr-chars">9 字符</span>
+        </div>
+
+        <div class="actions">
+          <button id="btn-download-png" class="btn btn-primary" type="button">
+            下载 PNG 图片<span class="btn-note">High-res</span>
+          </button>
+          <div class="action-row">
+            <button id="btn-download-svg" class="btn btn-ghost" type="button">下载 SVG</button>
+            <button id="btn-copy-img" class="btn btn-ghost" type="button">复制图片</button>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="container footer-inner">© 2026 Longtao Huang. All rights reserved.</div>
+</footer>
+
+<!-- 历史记录抽屉 -->
+<div id="modal-history" class="drawer-root" aria-hidden="true">
+  <div class="drawer-scrim"></div>
+  <aside class="drawer" id="history-box" role="dialog" aria-modal="true" aria-label="历史记录">
+    <div class="drawer-head">
+      <h2>历史记录</h2>
+      <button id="btn-close-history" class="close-btn" type="button" aria-label="关闭">
+        <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+          <path d="M2.2 2.2l7.6 7.6M9.8 2.2l-7.6 7.6"/>
+        </svg>
+      </button>
+    </div>
+
+    <div id="history-list" class="history-list"></div>
+
+    <div class="drawer-foot">
+      <button id="btn-clear-history" type="button">清空记录</button>
+      <span>本地保存最近 10 条</span>
+    </div>
+  </aside>
+</div>
+
+<div id="toast-container" role="status" aria-live="polite"></div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  'use strict';
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  var qrCode = null;
+  var currentType = 'text';
+  var uploadedLogoUrl = null;
+  var historyData = [];
+  try { historyData = JSON.parse(localStorage.getItem('qr_history') || '[]'); } catch (e) { historyData = []; }
+
+  var TYPE_LABEL = { url: '网址', text: '文本', wifi: 'Wi-Fi' };
+
+  var typeTabs = document.querySelectorAll('.type-tab');
+  var formGroups = document.querySelectorAll('.form-group');
+  var qrWrapper = $('qr-canvas-wrapper');
+
+  var colorDots = $('color-dots');
+  var colorDotsText = $('color-dots-text');
+  var colorBg = $('color-bg');
+  var colorBgText = $('color-bg-text');
+  var bgTransparent = $('bg-transparent');
+
+  var dotsStyle = $('dots-style');
+  var cornersSquareStyle = $('corners-square-style');
+  var cornersDotStyle = $('corners-dot-style');
+
+  var logoFileInput = $('logo-file');
+  var logoName = $('logo-name');
+  var btnRemoveLogo = $('btn-remove-logo');
+  var logoSize = $('logo-size');
+  var valLogoSize = $('val-logo-size');
+  var logoMargin = $('logo-margin');
+  var valLogoMargin = $('val-logo-margin');
+
+  var qrSize = $('qr-size');
+  var eccLevel = $('ecc-level');
+  var metaSize = $('meta-size');
+  var metaEcc = $('meta-ecc');
+  var qrDataLabel = $('qr-data');
+  var qrChars = $('qr-chars');
+
+  /* ---------- 分段控件 → 原生 select ---------- */
+  document.querySelectorAll('.seg').forEach(function (seg) {
+    var sel = $(seg.dataset.for);
+    if (!sel) return;
+    var sync = function () {
+      Array.prototype.forEach.call(seg.children, function (b) {
+        b.classList.toggle('is-active', b.dataset.val === sel.value);
+      });
+    };
+    seg.addEventListener('click', function (e) {
+      var btn = e.target.closest('button[data-val]');
+      if (!btn) return;
+      sel.value = btn.dataset.val;
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      sync();
+    });
+    sel.addEventListener('change', sync);
+    sync();
+  });
+
+  /* ---------- 内容拼装 ---------- */
+  /* 输入框为空时用示例内容生成一张可扫描的示范码（示例本身不含「例如」字样） */
+  var SAMPLE = {
+    text: '你好 Hello!',
+    url: 'https://hlongt.github.io'
+  };
+
+  function isSampleMode() {
+    if (currentType === 'text') return !$('input-text').value.trim();
+    if (currentType === 'url') return !$('input-url').value.trim();
+    return false;
+  }
+
+  function getRawData() {
+    switch (currentType) {
+      case 'url':
+        return $('input-url').value.trim() || SAMPLE.url;
+      case 'text':
+        return $('input-text').value.trim() || SAMPLE.text;
+      case 'wifi': {
+        var ssid = $('wifi-ssid').value.trim();
+        var pass = $('wifi-password').value.trim();
+        var enc = $('wifi-encryption').value;
+        if (!ssid) return '';
+        return 'WIFI:S:' + ssid + ';T:' + enc + ';P:' + pass + ';;';
+      }
+      default:
+        return '';
+    }
+  }
+
+  /* ---------- 渲染 ---------- */
+  /* 库内部默认按单字节取码（charCodeAt & 0xff），中文会被截断成乱码。
+     这里先把文本编码成 UTF-8 字节串再交给它，中英数字符号混排都能被正常扫出。 */
+  function toUtf8Bytes(str) {
+    if (window.TextEncoder) {
+      var bytes = new TextEncoder().encode(str);
+      var out = '';
+      for (var i = 0; i < bytes.length; i += 1) out += String.fromCharCode(bytes[i]);
+      return out;
+    }
+    try { return unescape(encodeURIComponent(str)); } catch (e) { return str; }
+  }
+
+  function updateQRCode() {
+    var rawData = getRawData();
+    var sizeVal = parseInt(qrSize.value, 10);
+    var eccVal = eccLevel.value;
+    var pct = eccVal === 'H' ? '30%' : eccVal === 'Q' ? '25%' : eccVal === 'M' ? '15%' : '7%';
+
+    metaSize.textContent = sizeVal + ' × ' + sizeVal;
+    metaEcc.textContent = 'ECC ' + eccVal + ' · ' + pct;
+
+    qrDataLabel.textContent = (TYPE_LABEL[currentType] || currentType) + (isSampleMode() ? ' · 示例' : '');
+    qrChars.textContent = Array.from(rawData).length + ' 字符';
+
+    if (!rawData) {
+      qrCode = null;
+      qrWrapper.innerHTML = '<p class="qr-empty">尚未输入内容</p>';
+      return;
+    }
+
+    var options = {
+      width: 300,
+      height: 300,
+      type: 'svg',
+      data: toUtf8Bytes(rawData),
+      image: uploadedLogoUrl || '',
+      dotsOptions: {
+        color: colorDots.value,
+        type: dotsStyle.value
+      },
+      backgroundOptions: {
+        color: bgTransparent.checked ? 'transparent' : colorBg.value
+      },
+      imageOptions: {
+        crossOrigin: 'anonymous',
+        margin: parseInt(logoMargin.value, 10),
+        imageSize: parseFloat(logoSize.value)
+      },
+      cornersSquareOptions: {
+        type: cornersSquareStyle.value,
+        color: colorDots.value
+      },
+      cornersDotOptions: {
+        type: cornersDotStyle.value,
+        color: colorDots.value
+      },
+      qrOptions: {
+        errorCorrectionLevel: eccVal
+      }
+    };
+
+    if (!qrCode) {
+      qrCode = new QRCodeStyling(options);
+      qrWrapper.innerHTML = '';
+      qrCode.append(qrWrapper);
+    } else {
+      qrCode.update(options);
+    }
+  }
+
+  /* ---------- 类型切换 ---------- */
+  Array.prototype.forEach.call(typeTabs, function (tab) {
+    tab.addEventListener('click', function () {
+      Array.prototype.forEach.call(typeTabs, function (t) {
+        t.classList.remove('is-active');
+        t.setAttribute('aria-selected', 'false');
+      });
+      tab.classList.add('is-active');
+      tab.setAttribute('aria-selected', 'true');
+
+      currentType = tab.dataset.type;
+
+      Array.prototype.forEach.call(formGroups, function (fg) {
+        fg.hidden = fg.id !== 'form-' + currentType;
+      });
+
+      updateQRCode();
+    });
+  });
+
+  /* ---------- 颜色联动 ---------- */
+  colorDots.addEventListener('input', function (e) {
+    colorDotsText.value = e.target.value.toUpperCase();
+    updateQRCode();
+  });
+  colorDotsText.addEventListener('change', function (e) {
+    var v = e.target.value.trim();
+    if (/^#?[0-9A-F]{6}$/i.test(v)) {
+      if (v.charAt(0) !== '#') v = '#' + v;
+      colorDots.value = v;
+      e.target.value = v.toUpperCase();
+      updateQRCode();
+    } else {
+      e.target.value = colorDots.value.toUpperCase();
+    }
+  });
+
+  colorBg.addEventListener('input', function (e) {
+    colorBgText.value = e.target.value.toUpperCase();
+    updateQRCode();
+  });
+  colorBgText.addEventListener('change', function (e) {
+    var v = e.target.value.trim();
+    if (/^#?[0-9A-F]{6}$/i.test(v)) {
+      if (v.charAt(0) !== '#') v = '#' + v;
+      colorBg.value = v;
+      e.target.value = v.toUpperCase();
+      updateQRCode();
+    } else {
+      e.target.value = colorBg.value.toUpperCase();
+    }
+  });
+
+  bgTransparent.addEventListener('change', function () {
+    colorBg.disabled = bgTransparent.checked;
+    colorBgText.disabled = bgTransparent.checked;
+    updateQRCode();
+  });
+
+  /* ---------- 表单实时更新 ---------- */
+  document.querySelectorAll('#form-container input, #form-container textarea, #form-container select').forEach(function (input) {
+    input.addEventListener('input', updateQRCode);
+  });
+
+  [dotsStyle, cornersSquareStyle, cornersDotStyle, qrSize, eccLevel].forEach(function (sel) {
+    sel.addEventListener('change', updateQRCode);
+  });
+
+  logoSize.addEventListener('input', function (e) {
+    valLogoSize.textContent = e.target.value;
+    updateQRCode();
+  });
+
+  logoMargin.addEventListener('input', function (e) {
+    valLogoMargin.textContent = e.target.value + 'px';
+    updateQRCode();
+  });
+
+  /* ---------- Logo ---------- */
+  var logoDepRows = document.querySelectorAll('.row.logo-dep');
+  function syncLogoDep() {
+    var has = !!uploadedLogoUrl;
+    Array.prototype.forEach.call(logoDepRows, function (r) { r.classList.toggle('is-off', !has); });
+    logoSize.disabled = !has;
+    logoMargin.disabled = !has;
+  }
+
+  logoFileInput.addEventListener('change', function (e) {
+    var file = e.target.files[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      showToast('图片不能超过 2 MB', 'error');
+      e.target.value = '';
+      return;
+    }
+    var reader = new FileReader();
+    reader.onload = function (evt) {
+      uploadedLogoUrl = evt.target.result;
+      logoName.textContent = file.name;
+      btnRemoveLogo.hidden = false;
+      syncLogoDep();
+      updateQRCode();
+      showToast('图标已载入');
+    };
+    reader.readAsDataURL(file);
+  });
+
+  btnRemoveLogo.addEventListener('click', function () {
+    uploadedLogoUrl = null;
+    logoFileInput.value = '';
+    logoName.textContent = '未选择';
+    btnRemoveLogo.hidden = true;
+    syncLogoDep();
+    updateQRCode();
+    showToast('已移除中心图标');
+  });
+
+  /* ---------- 历史 ---------- */
+  function saveToHistory(dataText) {
+    if (!dataText) return;
+    var newItem = {
+      id: Date.now(),
+      type: currentType,
+      data: dataText,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    };
+    historyData = [newItem].concat(historyData.filter(function (item) { return item.data !== dataText; })).slice(0, 10);
+    try { localStorage.setItem('qr_history', JSON.stringify(historyData)); } catch (e) {}
+  }
+
+  /* ---------- 下载 / 复制 ---------- */
+  $('btn-download-png').addEventListener('click', function () {
+    if (!qrCode) { showToast('请先输入内容', 'error'); return; }
+    saveToHistory(getRawData());
+
+    var exportSize = parseInt(qrSize.value, 10);
+    var downloadQR = new QRCodeStyling(Object.assign({}, qrCode._options, {
+      width: exportSize,
+      height: exportSize
+    }));
+
+    downloadQR.download({ name: 'QR_Code_' + Date.now(), extension: 'png' });
+    showToast('正在下载 PNG · ' + exportSize + 'px');
+  });
+
+  $('btn-download-svg').addEventListener('click', function () {
+    if (!qrCode) { showToast('请先输入内容', 'error'); return; }
+    saveToHistory(getRawData());
+    qrCode.download({ name: 'QR_Code_Vector_' + Date.now(), extension: 'svg' });
+    showToast('正在下载 SVG 矢量文件');
+  });
+
+  $('btn-copy-img').addEventListener('click', async function () {
+    if (!qrCode) { showToast('请先输入内容', 'error'); return; }
+    try {
+      var svgElement = qrWrapper.querySelector('svg');
+      if (!svgElement) throw new Error('未获取到二维码图形');
+
+      var svgData = new XMLSerializer().serializeToString(svgElement);
+      var svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+      var URLObj = window.URL || window.webkitURL || window;
+      var blobURL = URLObj.createObjectURL(svgBlob);
+
+      var img = new Image();
+      img.onload = function () {
+        var canvas = document.createElement('canvas');
+        canvas.width = 500;
+        canvas.height = 500;
+        var ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, 500, 500);
+
+        canvas.toBlob(async function (blob) {
+          if (blob && navigator.clipboard && window.ClipboardItem) {
+            try {
+              await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+              saveToHistory(getRawData());
+              renderHistory();
+              showToast('图片已复制到剪贴板');
+            } catch (err) {
+              showToast('浏览器限制了剪贴板写入', 'error');
+            }
+          } else {
+            showToast('此浏览器不支持复制图片', 'error');
+          }
+        }, 'image/png');
+      };
+      img.src = blobURL;
+    } catch (err) {
+      showToast('复制失败：' + err.message, 'error');
+    }
+  });
+
+  /* ---------- 抽屉 ---------- */
+  var modalHistory = $('modal-history');
+  var historyList = $('history-list');
+
+  function renderHistory() {
+    historyList.innerHTML = '';
+    if (historyData.length === 0) {
+      var empty = document.createElement('p');
+      empty.className = 'history-empty';
+      empty.textContent = '还没有记录。下载或复制一次二维码后，会自动保存在这里。';
+      historyList.appendChild(empty);
+      return;
+    }
+
+    historyData.forEach(function (item) {
+      var el = document.createElement('button');
+      el.type = 'button';
+      el.className = 'history-item';
+
+      var typeEl = document.createElement('span');
+      typeEl.className = 'hi-type';
+      typeEl.textContent = TYPE_LABEL[item.type] || item.type;
+
+      var timeEl = document.createElement('span');
+      timeEl.className = 'hi-time';
+      timeEl.textContent = item.time || '';
+
+      var dataEl = document.createElement('span');
+      dataEl.className = 'hi-data';
+      dataEl.textContent = item.data;
+
+      el.appendChild(typeEl);
+      el.appendChild(timeEl);
+      el.appendChild(dataEl);
+
+      el.addEventListener('click', function () {
+        var targetTab = document.querySelector('.type-tab[data-type="' + item.type + '"]') || typeTabs[0];
+        targetTab.click();
+
+        if (item.type === 'url') $('input-url').value = item.data;
+        if (item.type === 'text') $('input-text').value = item.data;
+
+        updateQRCode();
+        toggleModal(false);
+        showToast('已载入这条记录');
+      });
+
+      historyList.appendChild(el);
+    });
+  }
+
+  function toggleModal(show) {
+    modalHistory.classList.toggle('is-open', show);
+    modalHistory.setAttribute('aria-hidden', show ? 'false' : 'true');
+    document.body.style.overflow = show ? 'hidden' : '';
+    if (show) renderHistory();
+  }
+
+  $('btn-history').addEventListener('click', function () { toggleModal(true); });
+  $('btn-close-history').addEventListener('click', function () { toggleModal(false); });
+  modalHistory.addEventListener('click', function (e) {
+    if (e.target === modalHistory || e.target.classList.contains('drawer-scrim')) toggleModal(false);
+  });
+
+  $('btn-clear-history').addEventListener('click', function () {
+    historyData = [];
+    try { localStorage.removeItem('qr_history'); } catch (e) {}
+    renderHistory();
+    showToast('历史记录已清空');
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && modalHistory.classList.contains('is-open')) toggleModal(false);
+  });
+
+  /* ---------- 提示条 ---------- */
+  function showToast(message, type) {
+    var container = $('toast-container');
+    var toast = document.createElement('div');
+    toast.className = 'toast' + (type === 'error' ? ' is-error' : '');
+
+    var span = document.createElement('span');
+    span.textContent = message;
+    toast.appendChild(span);
+
+    container.appendChild(toast);
+    requestAnimationFrame(function () { toast.classList.add('in'); });
+
+    setTimeout(function () {
+      toast.classList.remove('in');
+      setTimeout(function () { toast.remove(); }, 300);
+    }, 2600);
+  }
+
+  // 首屏
+  syncLogoDep();
+  updateQRCode();
+});
+</script>
+</body>
+</html>
